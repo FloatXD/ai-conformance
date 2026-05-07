@@ -2,12 +2,12 @@
 
 ## The self assessment
 
-The standard set of conformance requirements are defined in `docs/AiConformance-x.yy.yaml` for each Kubernetes Version
+The set of conformance requirements for each Kubernetes version are defined in the `AiConformance-x.yy.yaml` in the [docs](https://github.com/cncf/k8s-ai-conformance/tree/main/docs) folder. 
 
-## Uploading
+## Submitting the self assessment 
 
 Prepare a PR to
-[https://github.com/cncf/ai-conformance](https://github.com/cncf/ai-conformance).
+[https://github.com/cncf/k8s-ai-conformance](https://github.com/cncf/k8s-ai-conformance).
 Here are [directions](https://help.github.com/en/articles/creating-a-pull-request-from-a-fork) to
 prepare a pull request from a fork.
 In the descriptions below, `X.Y` refers to the kubernetes major and minor
@@ -17,7 +17,7 @@ product.  Examples would be `gke` or `openshift`.
 
 ### Contents of the PR
 
-You need to submit the completed self assesment yaml for the relevant major/minor Version of Kubernetes
+You must submit the completed self assesment manifest file for the relevant major/minor version of Kubernetes. 
 
 ```
 vX.Y/$dir/PRODUCT.yaml: See below.
@@ -29,7 +29,7 @@ This file describes your product. It is YAML formatted with the following root-l
 
 | Field                   | Description                                                                                                                                                                                                                             |
 |-------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `vendorName`            | Name of the legal entity that is certifying. This entity must have a signed participation form on file with the CNCF                                                                                                                    |
+| `vendorName`            | Name of the legal entity that is certifying. This entity must have a signed participation form on file with the CNCF. This must be an exact match to the organization's name as listed under CNCF Members in the [CNCF Landscape](https://landscape.cncf.io/members). |
 | `kubernetesVersion`     | Kubernetes Version to verify                                                                                                                                                                                                            |
 | `platformName`          | Name of the product being certified.                                                                                                                                                                                                    |
 | `platformVersion`       | The version of the product being certified (not the version of Kubernetes it runs).                                                                                                                                                     |
@@ -39,6 +39,7 @@ This file describes your product. It is YAML formatted with the following root-l
 | `productLogoUrl`      | URL to the product's logo, (must be in SVG, AI or EPS format -- not a PNG -- and include the product name). OPTIONAL. If not supplied, we'll use your company logo. Please see logo [guidelines](https://github.com/cncf/landscape#logos) |
 | `description`           | One sentence description of your offering                                                                                                                                                                                               |
 | `contactEmailAddress` | An email address which can be used to contact maintainers regarding the product submitted and updates to the submission process                                                                                                         |
+| `k8sConformanceUrl`   | URL to your product's Kubernetes Conformance submission in [cncf/k8s-conformance](https://github.com/cncf/k8s-conformance). Format: `https://github.com/cncf/k8s-conformance/tree/master/vX.Y/product-name`                              |
 
 Examples below are for a fictional Kubernetes implementation called _Turbo
 Encabulator_ produced by a company named _Yoyodyne_.
@@ -55,34 +56,29 @@ metadata:
   product_logo_url: https://yoyo.dyne/assets/turbo-encabulator.svg
   description: "The Yoyodyne Turbo Encabulator is a superb Kubernetes distribution for all of your Encabulating needs."
   contact_email_address: yoyodyne@turbo-encabulator.org
+  k8s_conformance_url: https://github.com/cncf/k8s-conformance/tree/master/v1.34/turbo-encabulator
 ```
 
 ### Requirements
 
-The Self conformance file needs to be submitted without any adjustments or changes in spec to the fields `id, description, level`.
+The self conformance file must be submitted without adjustments or changes in spec to the fields `id, description, level`.
 The fields `status, evidence, and notes` need to be filled if the `level` is `MUST`.
 
-To reach conformance all `MUST` spec fields need to be addressed. The evidence needs to be publicly reachable. 
+To reach conformance all `MUST` spec fields need to be addressed and the evidence needs to be publicly reachable. 
 
 
 ## Amendment for Private Review
 
-If you need a private review for an unreleased product, please email a zip file containing what you would otherwise submit
+If you require a private review for an unreleased product, please email a .zip file containing what you would otherwise submit
 as a pull request to conformance@cncf.io and the documentation for the evidence. We'll review and confirm that you are ready to be Certified AI Kubernetes Platform
 as soon as you open the pull request. We can then often arrange to accept your pull request soon after you make it, at which point you become Certified Kubernetes.
 
 ## Review
 
-A reviewer will shortly comment on and/or accept your pull request, following this [process](reviewing.md).
-If you don't see a response within 10 business days, please contact conformance@cncf.io.
-
+A reviewer will comment on and/or accept your pull request, typically within 10 business days. If you don't see a response, please contact conformance@cncf.io.
 
 ## Issues
 
-If you have problems certifying that you feel are an issue with the conformance
-program itself (and not just your own implementation), you can file an issue in
-the [repository](https://github.com/cncf/ai-conformance). Questions and
-comments can also be sent to the working group's
-[mailing list and slack channel](README-WG.md).
-[WG AI Conformance](https://github.com/kubernetes/community/tree/master/wg-ai-conformance)
-is the change controller of the conformance definition. 
+If you encounter issues with the conformance program itself during certification (rather than problems with your own implementation), you can file an issue in the [repository](https://github.com/cncf/k8s-ai-conformance).
+
+Questions and comments can also be sent to the [AI Conformance](https://github.com/kubernetes/community/tree/master/wg-ai-conformance) working group, which is the change controller of the conformance definition. You can also reach the community on [Slack](https://kubernetes.slack.com/archives/C09813W8DC2). 
