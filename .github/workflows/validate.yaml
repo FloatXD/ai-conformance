@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'v*/**'
+      - 'scripts/**'
+      - '.github/workflows/validate.yaml'
   workflow_dispatch:
     inputs:
       product_dirs:
@@ -27,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
+      - name: Run validator unit tests
+        run: go test -v -tags validate ./scripts/...
+
       - name: Determine product files to validate
         id: files
         env:
@@ -40,8 +45,9 @@ jobs:
           else
             # Any file added/changed under vX.Y/<product>/ (PRODUCT.yaml or test
             # artifacts) triggers validation of that product's PRODUCT.yaml.
+            # grep exits 1 on no match; don't let pipefail kill the step.
             DIRS=$(git diff --name-only --diff-filter=ACMR "${BASE_SHA}...${HEAD_SHA}" \
-              | grep -E '^v[0-9]+\.[0-9]+/[^/]+/' \
+              | { grep -E '^v[0-9]+\.[0-9]+/[^/]+/' || true; } \
               | cut -d/ -f1,2 \
               | sort -u \
               | tr '\n' ' ')
