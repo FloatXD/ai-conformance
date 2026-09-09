@@ -180,6 +180,9 @@ type evidenceRef struct {
 	Fragment string // optional "#TestName" fragment, without the "#"
 }
 
+// productDirPrefix matches a repo-root style "vX.Y/<product>/" path prefix.
+var productDirPrefix = regexp.MustCompile(`^v\d+\.\d+/[^/]+/`)
+
 // resolveEvidencePath resolves a local evidence link (a bare relative path or
 // a file:// URL, optionally with a #fragment) to a file inside productDir.
 //
@@ -201,11 +204,15 @@ func resolveEvidencePath(productDir, link string) (evidenceRef, error) {
 		return evidenceRef{}, fmt.Errorf("empty file path")
 	}
 
-	// Strip the product's own "vX.Y/$dir/" prefix if present.
+	// Strip the product's own "vX.Y/$dir/" prefix if present; any other
+	// product directory reference is an error rather than a confusing
+	// "not found at vX.Y/own/vX.Y/other/..." message.
 	cleanDir := filepath.Clean(productDir)
 	ownPrefix := filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(cleanDir)), filepath.Base(cleanDir))) + "/"
 	if strings.HasPrefix(raw, ownPrefix) {
 		raw = strings.TrimPrefix(raw, ownPrefix)
+	} else if productDirPrefix.MatchString(raw) {
+		return evidenceRef{}, fmt.Errorf("path %q references a different product directory; evidence must live in %s", link, productDir)
 	}
 
 	full := filepath.Join(cleanDir, filepath.FromSlash(raw))
@@ -294,7 +301,9 @@ func (r *artifactReport) outcomeFor(name string) testOutcome {
 	return outcomePass
 }
 
-// artifactKind classifies a test artifact by filename.
+// artifactKind classifies a test artifact by its canonical filename. Only the
+// names documented in instructions.md are recognized, so unrelated evidence
+// files (install.log, cluster-config.json, ...) are not parsed as test output.
 type artifactKind int
 
 const (
@@ -304,16 +313,14 @@ const (
 	artifactE2ELog
 )
 
+var canonicalArtifacts = map[string]artifactKind{
+	"junit.xml":    artifactJUnit,
+	"results.json": artifactGoTestJSON,
+	"e2e.log":      artifactE2ELog,
+}
+
 func classifyArtifact(path string) artifactKind {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".xml":
-		return artifactJUnit
-	case ".json":
-		return artifactGoTestJSON
-	case ".log":
-		return artifactE2ELog
-	}
-	return artifactNone
+	return canonicalArtifacts[strings.ToLower(filepath.Base(path))]
 }
 
 // parseArtifact reads and parses a test artifact according to its kind.
@@ -468,27 +475,21 @@ func parseE2ELog(r io.Reader) (*artifactReport, error) {
 	return report, nil
 }
 
-// artifactCheck holds the results of inspecting one referenced test artifact
-// against a requirement.
-type artifactCheck struct {
-	errors   []string
-	warnings []string
-}
-
 // checkArtifactEvidence inspects a referenced test artifact for the given
-// requirement. Any failing test in the artifact is an error. If the link has
-// an explicit #fragment, the named test must exist and pass; a skipped test
-// is an error when the requirement is marked Implemented. Without a fragment,
-// the requirement's known upstream test (if any) is checked as a warning.
-func checkArtifactEvidence(ref evidenceRef, kind artifactKind, link, reqID, status string, reports map[string]*artifactReport) artifactCheck {
-	var out artifactCheck
+// requirement. Any failing test in the artifact is an error. The test to
+// check is the explicit #fragment if present, otherwise the upstream test
+// mapped to the requirement (if any). That test must exist and pass; a
+// skipped test is an error when the requirement is marked Implemented.
+func checkArtifactEvidence(ref evidenceRef, kind artifactKind, link, reqID, status string, reports map[string]*artifactReport) []string {
+	var out []string
+	artifactName := strings.SplitN(link, "#", 2)[0]
 
 	report, seen := reports[ref.Path]
 	if !seen {
 		var err error
 		report, err = parseArtifact(ref.Path, kind)
 		if err != nil {
-			out.errors = append(out.errors, fmt.Sprintf("Invalid test artifact for '%s': %s (%v)", reqID, link, err))
+			out = append(out, fmt.Sprintf("Invalid test artifact for '%s': %s (%v)", reqID, artifactName, err))
 			reports[ref.Path] = nil
 			return out
 		}
@@ -496,7 +497,7 @@ func checkArtifactEvidence(ref evidenceRef, kind artifactKind, link, reqID, stat
 		if len(report.Failures) > 0 {
 			failures := append([]string(nil), report.Failures...)
 			sort.Strings(failures)
-			out.errors = append(out.errors, fmt.Sprintf("Test artifact %s contains failing tests: %s", link, strings.Join(failures, ", ")))
+			out = append(out, fmt.Sprintf("Test artifact %s contains failing tests: %s", artifactName, strings.Join(failures, ", ")))
 		}
 	}
 	if report == nil {
@@ -504,29 +505,22 @@ func checkArtifactEvidence(ref evidenceRef, kind artifactKind, link, reqID, stat
 		return out
 	}
 
-	if ref.Fragment != "" {
-		outcome := report.outcomeFor(ref.Fragment)
-		switch outcome {
-		case outcomeUnknown:
-			out.errors = append(out.errors, fmt.Sprintf("Test '%s' referenced by '%s' was not found in %s", ref.Fragment, reqID, link))
-		case outcomeFail:
-			out.errors = append(out.errors, fmt.Sprintf("Test '%s' referenced by '%s' failed in %s", ref.Fragment, reqID, link))
-		case outcomeSkip:
-			if status == "Implemented" {
-				out.errors = append(out.errors, fmt.Sprintf("Requirement '%s' is Implemented but test '%s' was skipped in %s", reqID, ref.Fragment, link))
-			}
-		}
+	testName := ref.Fragment
+	if testName == "" {
+		testName = autoTestedRequirements[reqID]
+	}
+	if testName == "" {
 		return out
 	}
 
-	if testName, ok := autoTestedRequirements[reqID]; ok {
-		switch report.outcomeFor(testName) {
-		case outcomeUnknown:
-			out.warnings = append(out.warnings, fmt.Sprintf("Artifact %s referenced by '%s' does not contain test '%s'; consider referencing it explicitly with #%s", link, reqID, testName, testName))
-		case outcomeSkip:
-			if status == "Implemented" {
-				out.warnings = append(out.warnings, fmt.Sprintf("Requirement '%s' is Implemented but test '%s' was skipped in %s", reqID, testName, link))
-			}
+	switch report.outcomeFor(testName) {
+	case outcomeUnknown:
+		out = append(out, fmt.Sprintf("Test '%s' referenced by '%s' was not found in %s", testName, reqID, artifactName))
+	case outcomeFail:
+		out = append(out, fmt.Sprintf("Test '%s' referenced by '%s' failed in %s", testName, reqID, artifactName))
+	case outcomeSkip:
+		if status == "Implemented" {
+			out = append(out, fmt.Sprintf("Requirement '%s' is Implemented but test '%s' was skipped in %s", reqID, testName, artifactName))
 		}
 	}
 	return out
@@ -760,12 +754,8 @@ func validateProduct(path string, cncfMembers map[string]bool) bool {
 						continue
 					}
 					hasArtifact = true
-					result := checkArtifactEvidence(ref, kind, link, sReq.ID, pReq.Status, artifactReports)
-					for _, e := range result.errors {
+					for _, e := range checkArtifactEvidence(ref, kind, link, sReq.ID, pReq.Status, artifactReports) {
 						addError(e)
-					}
-					for _, w := range result.warnings {
-						addWarning(w)
 					}
 				}
 

@@ -41,7 +41,8 @@ func TestResolveEvidencePath(t *testing.T) {
 		{name: "file scheme repo-root style", link: "file://v1.37/gke/junit.xml#TestSecureAcceleratorAccess", wantPath: filepath.Join(productDir, "junit.xml"), wantFragment: "TestSecureAcceleratorAccess"},
 		{name: "file scheme triple slash", link: "file:///v1.37/gke/results.json", wantPath: filepath.Join(productDir, "results.json")},
 		{name: "subdirectory", link: "artifacts/junit.xml", wantPath: filepath.Join(productDir, "artifacts", "junit.xml")},
-		{name: "other product dir rejected", link: "file://v1.37/other/junit.xml", wantPath: filepath.Join(productDir, "v1.37", "other", "junit.xml")},
+		{name: "other product dir rejected", link: "file://v1.37/other/junit.xml", wantErr: true},
+		{name: "other version same product rejected", link: "v1.36/gke/junit.xml", wantErr: true},
 		{name: "parent traversal rejected", link: "../other/junit.xml", wantErr: true},
 		{name: "file scheme traversal rejected", link: "file://../../secret", wantErr: true},
 		{name: "empty path", link: "file://#TestX", wantErr: true},
@@ -71,12 +72,17 @@ func TestResolveEvidencePath(t *testing.T) {
 
 func TestClassifyArtifact(t *testing.T) {
 	cases := map[string]artifactKind{
-		"junit.xml":    artifactJUnit,
-		"REPORT.XML":   artifactJUnit,
-		"results.json": artifactGoTestJSON,
-		"e2e.log":      artifactE2ELog,
-		"README.md":    artifactNone,
-		"proof.pdf":    artifactNone,
+		"junit.xml":           artifactJUnit,
+		"artifacts/JUnit.XML": artifactJUnit,
+		"results.json":        artifactGoTestJSON,
+		"e2e.log":             artifactE2ELog,
+		"v1.37/acme/e2e.log":  artifactE2ELog,
+		"install.log":         artifactNone,
+		"driver-setup.log":    artifactNone,
+		"cluster-config.json": artifactNone,
+		"crd.json":            artifactNone,
+		"report.xml":          artifactNone,
+		"README.md":           artifactNone,
 	}
 	for name, want := range cases {
 		if got := classifyArtifact(name); got != want {
@@ -321,26 +327,26 @@ func TestCheckArtifactEvidence_Fragment(t *testing.T) {
 	reports := map[string]*artifactReport{}
 
 	ref.Fragment = "TestSecureAcceleratorAccess"
-	res := checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestSecureAcceleratorAccess", "secure_accelerator_access", "Implemented", reports)
-	if len(res.errors) != 0 || len(res.warnings) != 0 {
-		t.Errorf("passing fragment: errors=%v warnings=%v, want none", res.errors, res.warnings)
+	errs := checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestSecureAcceleratorAccess", "secure_accelerator_access", "Implemented", reports)
+	if len(errs) != 0 {
+		t.Errorf("passing fragment: errors=%v, want none", errs)
 	}
 
 	ref.Fragment = "TestDoesNotExist"
-	res = checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestDoesNotExist", "gang_scheduling", "Implemented", reports)
-	if len(res.errors) != 1 || !strings.Contains(res.errors[0], "was not found") {
-		t.Errorf("missing fragment: errors=%v, want one 'not found' error", res.errors)
+	errs = checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestDoesNotExist", "gang_scheduling", "Implemented", reports)
+	if len(errs) != 1 || !strings.Contains(errs[0], "was not found in junit.xml") {
+		t.Errorf("missing fragment: errors=%v, want one 'not found' error naming the artifact without fragment", errs)
 	}
 
 	ref.Fragment = "TestAcceleratorClusterAutoscaling"
-	res = checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestAcceleratorClusterAutoscaling", "cluster_autoscaling", "Implemented", reports)
-	if len(res.errors) != 1 || !strings.Contains(res.errors[0], "was skipped") {
-		t.Errorf("skipped+Implemented: errors=%v, want one 'was skipped' error", res.errors)
+	errs = checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestAcceleratorClusterAutoscaling", "cluster_autoscaling", "Implemented", reports)
+	if len(errs) != 1 || !strings.Contains(errs[0], "was skipped in junit.xml") {
+		t.Errorf("skipped+Implemented: errors=%v, want one 'was skipped' error", errs)
 	}
 
-	res = checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestAcceleratorClusterAutoscaling", "cluster_autoscaling", "N/A", reports)
-	if len(res.errors) != 0 {
-		t.Errorf("skipped+N/A: errors=%v, want none", res.errors)
+	errs = checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestAcceleratorClusterAutoscaling", "cluster_autoscaling", "N/A", reports)
+	if len(errs) != 0 {
+		t.Errorf("skipped+N/A: errors=%v, want none", errs)
 	}
 }
 
@@ -349,49 +355,59 @@ func TestCheckArtifactEvidence_FailuresReportedOnce(t *testing.T) {
 	ref := writeArtifact(t, dir, "junit.xml", junitFailing)
 	reports := map[string]*artifactReport{}
 
-	res := checkArtifactEvidence(ref, artifactJUnit, "junit.xml", "gang_scheduling", "Implemented", reports)
-	if len(res.errors) != 1 || !strings.Contains(res.errors[0], "contains failing tests: TestSecureAcceleratorAccess") {
-		t.Errorf("first reference: errors=%v, want one 'contains failing tests' error", res.errors)
+	ref.Fragment = "TestGangScheduling"
+	errs := checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestGangScheduling", "gang_scheduling", "Implemented", reports)
+	if len(errs) != 1 || !strings.Contains(errs[0], "Test artifact junit.xml contains failing tests: TestSecureAcceleratorAccess") {
+		t.Errorf("first reference: errors=%v, want one 'contains failing tests' error with fragment stripped from artifact name", errs)
 	}
 
-	res = checkArtifactEvidence(ref, artifactJUnit, "junit.xml", "secure_accelerator_access", "Implemented", reports)
-	for _, e := range res.errors {
+	ref.Fragment = ""
+	errs = checkArtifactEvidence(ref, artifactJUnit, "junit.xml", "secure_accelerator_access", "Implemented", reports)
+	for _, e := range errs {
 		if strings.Contains(e, "contains failing tests") {
-			t.Errorf("artifact-level failure reported twice: %v", res.errors)
+			t.Errorf("artifact-level failure reported twice: %v", errs)
 		}
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0], "failed in") {
+		t.Errorf("implicit failed test: errors=%v, want one 'failed in' error", errs)
 	}
 
 	ref.Fragment = "TestSecureAcceleratorAccess"
-	res = checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestSecureAcceleratorAccess", "secure_accelerator_access", "Implemented", reports)
-	if len(res.errors) != 1 || !strings.Contains(res.errors[0], "failed in") {
-		t.Errorf("failed fragment: errors=%v, want one 'failed in' error", res.errors)
+	errs = checkArtifactEvidence(ref, artifactJUnit, "junit.xml#TestSecureAcceleratorAccess", "secure_accelerator_access", "Implemented", reports)
+	if len(errs) != 1 || !strings.Contains(errs[0], "failed in") {
+		t.Errorf("failed fragment: errors=%v, want one 'failed in' error", errs)
 	}
 }
 
-func TestCheckArtifactEvidence_ImplicitTestWarnings(t *testing.T) {
+func TestCheckArtifactEvidence_ImplicitTest(t *testing.T) {
 	dir := t.TempDir()
 	ref := writeArtifact(t, dir, "results.json", goTestJSONPassing)
 	reports := map[string]*artifactReport{}
 
-	res := checkArtifactEvidence(ref, artifactGoTestJSON, "results.json", "secure_accelerator_access", "Implemented", reports)
-	if len(res.errors) != 0 || len(res.warnings) != 0 {
-		t.Errorf("present implicit test: errors=%v warnings=%v, want none", res.errors, res.warnings)
+	errs := checkArtifactEvidence(ref, artifactGoTestJSON, "results.json", "secure_accelerator_access", "Implemented", reports)
+	if len(errs) != 0 {
+		t.Errorf("present implicit test: errors=%v, want none", errs)
 	}
 
-	res = checkArtifactEvidence(ref, artifactGoTestJSON, "results.json", "cluster_autoscaling", "Implemented", reports)
-	if len(res.errors) != 0 || len(res.warnings) != 1 || !strings.Contains(res.warnings[0], "was skipped") {
-		t.Errorf("skipped implicit test: errors=%v warnings=%v, want one skip warning", res.errors, res.warnings)
+	errs = checkArtifactEvidence(ref, artifactGoTestJSON, "results.json", "cluster_autoscaling", "Implemented", reports)
+	if len(errs) != 1 || !strings.Contains(errs[0], "was skipped") {
+		t.Errorf("skipped implicit test + Implemented: errors=%v, want one skip error", errs)
 	}
 
-	res = checkArtifactEvidence(ref, artifactGoTestJSON, "results.json", "ai_inference", "Implemented", reports)
-	if len(res.errors) != 0 || len(res.warnings) != 0 {
-		t.Errorf("non-auto-tested requirement: errors=%v warnings=%v, want none", res.errors, res.warnings)
+	errs = checkArtifactEvidence(ref, artifactGoTestJSON, "results.json", "cluster_autoscaling", "N/A", reports)
+	if len(errs) != 0 {
+		t.Errorf("skipped implicit test + N/A: errors=%v, want none", errs)
+	}
+
+	errs = checkArtifactEvidence(ref, artifactGoTestJSON, "results.json", "ai_inference", "Implemented", reports)
+	if len(errs) != 0 {
+		t.Errorf("non-auto-tested requirement: errors=%v, want none", errs)
 	}
 
 	ref = writeArtifact(t, dir, "e2e.log", e2eLogFailing)
-	res = checkArtifactEvidence(ref, artifactE2ELog, "e2e.log", "secure_accelerator_access", "Implemented", reports)
-	if len(res.errors) != 1 || len(res.warnings) != 1 {
-		t.Errorf("failing log + missing implicit test: errors=%v warnings=%v, want 1 error and 1 warning", res.errors, res.warnings)
+	errs = checkArtifactEvidence(ref, artifactE2ELog, "e2e.log", "secure_accelerator_access", "Implemented", reports)
+	if len(errs) != 2 || !strings.Contains(errs[0], "contains failing tests") || !strings.Contains(errs[1], "was not found") {
+		t.Errorf("failing log + missing implicit test: errors=%v, want failing-tests error then not-found error", errs)
 	}
 }
 
@@ -400,12 +416,12 @@ func TestCheckArtifactEvidence_ParseErrorReportedOnce(t *testing.T) {
 	ref := writeArtifact(t, dir, "junit.xml", "garbage")
 	reports := map[string]*artifactReport{}
 
-	res := checkArtifactEvidence(ref, artifactJUnit, "junit.xml", "gang_scheduling", "Implemented", reports)
-	if len(res.errors) != 1 || !strings.Contains(res.errors[0], "Invalid test artifact") {
-		t.Errorf("first reference: errors=%v, want one parse error", res.errors)
+	errs := checkArtifactEvidence(ref, artifactJUnit, "junit.xml", "gang_scheduling", "Implemented", reports)
+	if len(errs) != 1 || !strings.Contains(errs[0], "Invalid test artifact") {
+		t.Errorf("first reference: errors=%v, want one parse error", errs)
 	}
-	res = checkArtifactEvidence(ref, artifactJUnit, "junit.xml", "secure_accelerator_access", "Implemented", reports)
-	if len(res.errors) != 0 {
-		t.Errorf("second reference to unparseable artifact should be silent, got %v", res.errors)
+	errs = checkArtifactEvidence(ref, artifactJUnit, "junit.xml", "secure_accelerator_access", "Implemented", reports)
+	if len(errs) != 0 {
+		t.Errorf("second reference to unparseable artifact should be silent, got %v", errs)
 	}
 }
